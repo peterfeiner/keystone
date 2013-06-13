@@ -62,7 +62,7 @@ class WritableLogger(object):
 class Server(object):
     """Server class to manage multiple WSGI sockets and applications."""
 
-    def __init__(self, application, host=None, port=None, threads=1000):
+    def __init__(self, application, host=None, port=None, threads=1000, backlog=128):
         self.application = application
         self.host = host or '0.0.0.0'
         self.port = port or 0
@@ -72,13 +72,6 @@ class Server(object):
         self.do_ssl = False
         self.cert_required = False
 
-    def start(self, key=None, backlog=128):
-        """Run a WSGI server with the given application."""
-        LOG.debug(_('Starting %(arg0)s on %(host)s:%(port)s') %
-                  {'arg0': sys.argv[0],
-                   'host': self.host,
-                   'port': self.port})
-
         # TODO(dims): eventlet's green dns/socket module does not actually
         # support IPv6 in getaddrinfo(). We need to get around this in the
         # future or monitor upstream for a fix
@@ -86,27 +79,37 @@ class Server(object):
                                   self.port,
                                   socket.AF_UNSPEC,
                                   socket.SOCK_STREAM)[0]
-        _socket = eventlet.listen(info[-1],
-                                  family=info[0],
-                                  backlog=backlog)
-        if key:
-            self.socket_info[key] = _socket.getsockname()
+        self._socket = eventlet.listen(info[-1],
+                                       family=info[0])
         # SSL is enabled
         if self.do_ssl:
             if self.cert_required:
                 cert_reqs = ssl.CERT_REQUIRED
             else:
                 cert_reqs = ssl.CERT_NONE
-            sslsocket = eventlet.wrap_ssl(_socket, certfile=self.certfile,
+            sslsocket = eventlet.wrap_ssl(self._socket, certfile=self.certfile,
                                           keyfile=self.keyfile,
                                           server_side=True,
                                           cert_reqs=cert_reqs,
                                           ca_certs=self.ca_certs)
-            _socket = sslsocket
+            self._socket = sslsocket
 
+        self._socket.setsockopt(socket.SOL_SOCKET,
+                                socket.SO_REUSEADDR, 1)
+        self._socket.setsockopt(socket.SOL_SOCKET,
+                                socket.SO_KEEPALIVE, 1)
+
+    def start(self, key=None):
+        """Run a WSGI server with the given application."""
+        LOG.debug(_('Starting %(arg0)s on %(host)s:%(port)s') %
+                  {'arg0': sys.argv[0],
+                   'host': self.host,
+                   'port': self.port})
+        if key:
+            self.socket_info[key] = self._socket.getsockname()
         self.greenthread = self.pool.spawn(self._run,
                                            self.application,
-                                           _socket)
+                                           self._socket)
 
     def set_ssl(self, certfile, keyfile=None, ca_certs=None,
                 cert_required=True):

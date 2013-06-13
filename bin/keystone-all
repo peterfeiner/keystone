@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 import greenlet
@@ -21,14 +21,18 @@ if os.path.exists(os.path.join(possible_topdir,
 
 from paste import deploy
 
+from oslo.config import cfg
 from keystone import config
 from keystone.common import wsgi
 from keystone.common import utils
 from keystone.openstack.common import importutils
 from keystone.openstack.common import version
 
+server_opts = [
+    cfg.IntOpt('workers', default=None)]
 
 CONF = config.CONF
+CONF.register_opts(server_opts)
 
 
 def create_server(conf, name, host, port):
@@ -49,8 +53,12 @@ def sigint_handler(signal, frame):
 def serve(*servers):
     signal.signal(signal.SIGINT, sigint_handler)
 
+    from keystone.service import ProcessLauncher
+    launchers = []
     for server in servers:
-        server.start()
+        launcher = ProcessLauncher()
+        launcher.launch_server(server, workers=CONF.workers)
+        launchers.append(launcher)
 
     # notify calling process we are ready to serve
     if CONF.onready:
@@ -63,9 +71,9 @@ def serve(*servers):
             except Exception:
                 logging.exception('Failed to execute onready command')
 
-    for server in servers:
+    for launcher in launchers:
         try:
-            server.wait()
+            launcher.wait()
         except greenlet.GreenletExit:
             pass
 
