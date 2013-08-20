@@ -44,9 +44,19 @@ class Server(object):
         self.greenthread = None
         self.do_ssl = False
         self.cert_required = False
+        self.socket = None
 
-    def start(self, key=None, backlog=128):
-        """Run a WSGI server with the given application."""
+    def listen(self, key=None, backlog=128):
+        """Create and start listening on socket.
+
+        Call before forking worker processes.
+
+        Raises Exception if this has already been called.
+        """
+
+        if self.socket is not None:
+            raise Exception(_('Server can only listen once.'))
+
         LOG.info(_('Starting %(arg0)s on %(host)s:%(port)s'),
                  {'arg0': sys.argv[0],
                   'host': self.host,
@@ -77,9 +87,17 @@ class Server(object):
                                           ca_certs=self.ca_certs)
             _socket = sslsocket
 
+        self.socket = _socket
+
+    def start(self, key=None, backlog=128):
+        """Run a WSGI server with the given application."""
+
+        if self.socket is None:
+            self.listen(key, backlog)
+
         self.greenthread = self.pool.spawn(self._run,
                                            self.application,
-                                           _socket)
+                                           self.socket)
 
     def set_ssl(self, certfile, keyfile=None, ca_certs=None,
                 cert_required=True):
@@ -92,6 +110,9 @@ class Server(object):
     def kill(self):
         if self.greenthread:
             self.greenthread.kill()
+
+    def stop(self):
+        self.kill()
 
     def wait(self):
         """Wait until all servers have completed running."""
@@ -108,6 +129,8 @@ class Server(object):
         try:
             eventlet.wsgi.server(socket, application, custom_pool=self.pool,
                                  log=logging.WritableLogger(log))
+        except greenlet.GreenletExit:
+            pass
         except Exception:
             LOG.exception(_('Server error'))
             raise

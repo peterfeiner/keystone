@@ -40,6 +40,8 @@ FILE_OPTIONS = {
                    default='http://localhost:%(public_port)s/'),
         cfg.StrOpt('admin_endpoint',
                    default='http://localhost:%(admin_port)s/'),
+        cfg.IntOpt('public_workers', default=1),
+        cfg.IntOpt('admin_workers', default=1),
         cfg.StrOpt('onready'),
         # default max request size is 112k
         cfg.IntOpt('max_request_body_size', default=114688),
